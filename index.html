@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>준결정 생성 시뮬레이터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* 레이아웃: 위 조작판(슬라이더) → 2D 원자 배열 | 3D 결정립 → 그래프 4개 (2×2). 좁으면 한 줄씩 */
+:root {
+  --bg: #F6F7F5;
+  --panel: #FFFFFF;
+  --ink: #222222;
+  --muted: #6B6E69;
+  --line: #DADDD8;
+  --q: #50A677;          /* 준결정 (팀 초록) */
+  --q-soft: #B3DBC4;
+  --q-ink: #2A7048;      /* 준결정 글자색 (흰 바탕 대비 확보) */
+  --c: #3A3C3A;          /* 결정 */
+  --c-soft: #9C9E99;
+  --liq: #C9C6BE;        /* 액체 */
+  --font-body: "IBM Plex Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  --font-num: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #141614; --panel: #1C1F1C; --ink: #E8EAE6; --muted: #9DA29A; --line: #333833;
+  --q: #5DBE88; --q-ink: #7FD3A3; --q-soft: #2E5E44; --c: #D4D6D1; --c-soft: #7E827C; --liq: #555852; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #141614; --panel: #1C1F1C; --ink: #E8EAE6; --muted: #9DA29A; --line: #333833;
+  --q: #5DBE88; --q-ink: #7FD3A3; --q-soft: #2E5E44; --c: #D4D6D1; --c-soft: #7E827C; --liq: #555852; color-scheme: dark }
+
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.5; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-block: 20px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 16px; }
+header h1 { margin: 0; font-size: 1.55rem; font-weight: 700; text-wrap: balance; letter-spacing: -0.01em; }
+header p { margin: 4px 0 0; color: var(--muted); max-width: 70ch; }
+
+.controls { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px 22px; align-items: end; }
+.ctl label { display: flex; justify-content: space-between; gap: 8px; font-weight: 500; font-size: 0.92rem; }
+.ctl output { font-family: var(--font-num); color: var(--q-ink); font-weight: 500; }
+.ctl small { color: var(--muted); font-size: 0.8rem; display: block; }
+input[type=range] { width: 100%; accent-color: var(--q); margin: 6px 0 0; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+button, .seg label { font: inherit; font-size: 0.88rem; border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  border-radius: 7px; padding: 6px 12px; cursor: pointer; }
+button:hover, .seg label:hover { border-color: var(--q); }
+button:focus-visible, .seg input:focus-visible + label, input[type=range]:focus-visible { outline: 2px solid var(--q); outline-offset: 2px; }
+#play { min-width: 76px; background: var(--q-ink); color: var(--panel); border-color: var(--q-ink); font-weight: 500; }
+.seg { display: flex; gap: 0; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label { border-radius: 0; }
+.seg label:first-of-type { border-radius: 7px 0 0 7px; }
+.seg label:last-of-type { border-radius: 0 7px 7px 0; margin-left: -1px; }
+.seg input:checked + label { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+.views { display: grid; grid-template-columns: 1.45fr 1fr; gap: 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0;
+  display: grid; gap: 8px; align-content: start; }
+.card h2 { margin: 0; font-size: 1rem; font-weight: 700; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.card h2 span { font-weight: 400; color: var(--muted); font-size: 0.85rem; }
+canvas { display: block; width: 100%; height: auto; border-radius: 6px; }
+#v3 { width: 100%; aspect-ratio: 1 / 1; max-height: 520px; border-radius: 6px; position: relative; }
+#v3 canvas { height: 100%; }
+#v3msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 0.9rem; text-align: center; padding: 20px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.84rem; color: var(--muted); }
+.legend i { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+.bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--liq); }
+.bar div { transition: width .12s linear; }
+.nums { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.86rem; color: var(--muted); }
+.nums b { font-family: var(--font-num); font-weight: 500; color: var(--ink); }
+.nums b.q { color: var(--q-ink); }
+
+.graphs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.graphs svg { width: 100%; height: auto; display: block; overflow: visible; }
+.graphs p { margin: 0; font-size: 0.84rem; color: var(--muted); }
+svg text { font-family: var(--font-body); fill: var(--ink); }
+svg .tick { font-family: var(--font-num); font-size: 11px; fill: var(--muted); }
+svg .sym { font-size: 15px; font-style: italic; }
+svg .lab { font-size: 12.5px; font-weight: 700; }
+.foot { color: var(--muted); font-size: 0.8rem; }
+@media (max-width: 860px) { .views, .graphs { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: reduce) { .bar div { transition: none; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>준결정 생성 시뮬레이터</h1>
+    <p>과냉도와 계면에너지 비를 바꾸면 핵생성 장벽, 상 분율, 아브라미 직선 기울기가 함께 바뀜. 시간 슬라이더 = 변태 진행 단계.</p>
+  </header>
+
+  <section class="controls" aria-label="조건">
+    <div class="ctl">
+      <label for="dT"><span>과냉도 ΔT/T<sub>C</sub></span> <output id="dTo">0.30</output></label>
+      <input id="dT" type="range" min="0.05" max="0.50" step="0.01" value="0.30">
+      <small>오른쪽 = 빨리 식힘 (온도 T/T<sub>C</sub> = 1 − ΔT)</small>
+    </div>
+    <div class="ctl">
+      <label for="gr"><span>계면에너지 비 γ<sub>Q</sub>/γ<sub>C</sub></span> <output id="gro">0.80</output></label>
+      <input id="gr" type="range" min="0.30" max="1.00" step="0.01" value="0.80">
+      <small>왼쪽 = 준결정 계면에너지 ↓ (정이십면체 질서)</small>
+    </div>
+    <div class="ctl">
+      <label for="t"><span>시간 t/τ</span> <output id="to">1.10</output></label>
+      <input id="t" type="range" min="0" max="1.8" step="0.01" value="1.10">
+      <small>τ = 절반쯤 변태하는 시간</small>
+    </div>
+    <div class="ctl">
+      <div class="row">
+        <button id="play" type="button">▶ 재생</button>
+        <button id="reseed" type="button">핵 다시 뽑기</button>
+      </div>
+      <div class="seg" role="radiogroup" aria-label="핵생성 방식" style="margin-top:8px">
+        <input type="radio" name="mode" id="m-cont" value="cont" checked><label for="m-cont">핵생성 계속</label>
+        <input type="radio" name="mode" id="m-sat" value="sat"><label for="m-sat">처음에 한꺼번에</label>
+      </div>
+    </div>
+  </section>
+
+  <section class="views">
+    <article class="card">
+      <h2>2D 원자 배열 <span>단면 64 × 40 원자</span></h2>
+      <canvas id="c2" width="1280" height="800" aria-label="2D 원자 배열 그림"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--q)"></i>준결정: 마름모 2종 타일 (5회 대칭, 주기 없음)</span>
+        <span><i style="background:var(--c)"></i>결정: 정사각 격자 (주기 있음)</span>
+        <span><i style="background:var(--liq)"></i>액체: 무질서</span>
+      </div>
+      <div class="bar" aria-hidden="true"><div id="b2q" style="background:var(--q)"></div><div id="b2c" style="background:var(--c)"></div></div>
+      <div class="nums"><span>준결정 <b class="q" id="n2q">–</b></span><span>결정 <b id="n2c">–</b></span><span>액체 <b id="n2l">–</b></span><span>결정립 <b id="n2g">–</b>개</span></div>
+    </article>
+    <article class="card">
+      <h2>3D 결정립 <span>40³ 칸, 드래그로 회전</span></h2>
+      <div id="v3"><div id="v3msg">3D 화면 불러오는 중</div></div>
+      <div class="ctl">
+        <label for="cut"><span>단면 위치</span> <output id="cuto">100%</output></label>
+        <input id="cut" type="range" min="0.05" max="1" step="0.01" value="1">
+      </div>
+      <div class="nums"><span>준결정 <b class="q" id="n3q">–</b></span><span>결정 <b id="n3c">–</b></span><span>최종 준결정 비율 이론 <b class="q" id="fth">–</b> / 시뮬 <b class="q" id="fsim">–</b></span></div>
+    </article>
+  </section>
+
+  <section class="graphs">
+    <article class="card">
+      <h2>핵의 자유에너지 ΔG(r) <span>장벽 높이 = 봉우리</span></h2>
+      <svg id="g1" viewBox="0 0 440 270" role="img" aria-label="반지름에 따른 자유에너지 그래프"></svg>
+      <p id="g1n"></p>
+    </article>
+    <article class="card">
+      <h2>온도에 따른 핵생성 장벽 <span>세로선 = 지금 온도</span></h2>
+      <svg id="g2" viewBox="0 0 440 270" role="img" aria-label="온도에 따른 핵생성 장벽 그래프"></svg>
+      <p id="g2n"></p>
+    </article>
+    <article class="card">
+      <h2>상 분율 X(t) <span>실선 = 이론, 점 = 3D 시뮬레이션</span></h2>
+      <svg id="g3" viewBox="0 0 440 270" role="img" aria-label="시간에 따른 상 분율 그래프"></svg>
+      <p id="g3n"></p>
+    </article>
+    <article class="card">
+      <h2>아브라미 직선 <span>기울기 = 아브라미 지수 n</span></h2>
+      <svg id="g4" viewBox="0 0 440 270" role="img" aria-label="아브라미 그래프"></svg>
+      <p id="g4n"></p>
+    </article>
+  </section>
+
+  <p class="foot">모델: 고전 핵생성 이론 + 존슨–멜 도달시간법 몬테카를로 (발표 3D 시뮬레이션과 같은 식). 결정 녹는점 T<sub>C</sub> = 1, 준결정 녹는점 0.9, 장벽 ΔG*/kT = 1.6·γ³/(Δg²·T), 핵생성 속도 ∝ exp(−ΔG*/kT), 성장속도 ∝ Δg. 파라미터는 경향 확인용 가정값. 2D 그림의 원자 배열은 결정립의 종류를 보여 주기 위한 그림 (실제 원자 간격과 무관).</p>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+"use strict";
+// ------------------------------------------------------------------ 모델 (jmak3d.py 이식)
+const TM = [0.9, 1.0], B0 = 1.6, T_END = 1.8;
+const df = (T, Tm) => Math.max((Tm - T) / Tm, 0);
+const barrier = (g, T, Tm) => { const d = df(T, Tm); return d > 0 ? B0 * g ** 3 / (d * d * T) : Infinity; };
+function params(dT, gr) {
+  const T = 1 - dT, BQ = barrier(gr, T, TM[0]), BC = barrier(1, T, TM[1]);
+  const logRho = isFinite(BQ) ? Math.max(-200, Math.min(200, -(BQ - BC))) : -200;
+  const g = df(T, TM[0]) / df(T, TM[1]);
+  return { T, BQ, BC, logRho, g };
+}
+const fTheory = (p, d, sat, nQ, nC) => {
+  if (p.g <= 0) return 0;
+  if (sat) { const a = nQ * p.g ** d, b = nC; return a + b > 0 ? a / (a + b) : 0; }
+  return 1 / (1 + Math.exp(-(p.logRho + d * Math.log(p.g))));
+};
+
+// 결정적 난수 (같은 씨앗이면 슬라이더를 움직여도 핵 위치가 그대로 → 변화가 매끄러움)
+function rng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+let SEED = 7;
+
+// d차원 상자(크기 L[])에서 핵 뽑기 + 이미 변태한 곳에 떨어진 핵 버리기
+function nucleate(L, nGrains, p, sat, seed) {
+  const d = L.length, V = L.reduce((a, b) => a * b, 1), r = rng(seed);
+  const rho = Math.exp(p.logRho), pQ = p.g > 0 ? rho / (1 + rho) : 0;
+  const gam = d === 3 ? 0.906 : 0.893;                  // Γ(1 + 1/n)
+  const M = sat ? nGrains : Math.round(nGrains * T_END / gam);
+  const cand = [];
+  for (let i = 0; i < M; i++) {
+    const pos = L.map(l => r() * l), ut = r(), up = r();
+    cand.push({ pos, t: sat ? 0 : ut * T_END, ph: up < pQ ? 0 : 1 });
+  }
+  let GQ, GC;
+  if (sat) {
+    const nQ = cand.filter(c => c.ph === 0).length, nC = M - nQ;
+    const om = d === 3 ? 4 * Math.PI / 3 : Math.PI;
+    const s = Math.pow(V / (om * (nQ * p.g ** d + nC)), 1 / d);
+    GQ = s * p.g; GC = s;
+  } else {
+    const c = nGrains / (gam * V * (1 + rho));
+    const s = Math.pow(3 / (Math.PI * c * (rho * p.g ** d + 1)), 1 / d);
+    GQ = s * p.g; GC = s;
+  }
+  cand.sort((a, b) => a.t - b.t);
+  const acc = [];
+  for (const c of cand) {
+    c.G = c.ph === 0 ? GQ : GC;
+    if (c.G <= 0) continue;
+    let dead = false;
+    for (const a of acc) {
+      let s2 = 0; for (let k = 0; k < d; k++) { const q = c.pos[k] - a.pos[k]; s2 += q * q; }
+      if (a.t + Math.sqrt(s2) / a.G < c.t) { dead = true; break; }
+    }
+    if (!dead) acc.push(c);
+  }
+  acc.forEach((a, i) => { a.id = i; a.shade = 0.78 + 0.36 * r(); a.rot = r() * Math.PI * 2; a.off = [r() * 6 - 3, r() * 6 - 3]; });
+  return { nuc: acc, GQ, GC, M };
+}
+
+// 도달시간 격자: 칸마다 가장 먼저 도달하는 핵(owner)과 시간(arr)
+function arrivalGrid(dims, h, nuc) {
+  const n = dims.reduce((a, b) => a * b, 1), d = dims.length;
+  const arr = new Float32Array(n).fill(Infinity), own = new Int32Array(n).fill(-1);
+  for (const a of nuc) {
+    const R = a.G * (T_END - a.t);
+    const lo = [], hi = [];
+    for (let k = 0; k < d; k++) { lo.push(Math.max(0, Math.floor((a.pos[k] - R) / h))); hi.push(Math.min(dims[k] - 1, Math.ceil((a.pos[k] + R) / h))); }
+    if (d === 2) {
+      for (let j = lo[1]; j <= hi[1]; j++) { const y = (j + 0.5) * h - a.pos[1];
+        for (let i = lo[0]; i <= hi[0]; i++) { const x = (i + 0.5) * h - a.pos[0];
+          const tt = a.t + Math.sqrt(x * x + y * y) / a.G, idx = j * dims[0] + i;
+          if (tt < arr[idx]) { arr[idx] = tt; own[idx] = a.id; } } }
+    } else {
+      const N = dims[0];
+      for (let k = lo[2]; k <= hi[2]; k++) { const z = (k + 0.5) - a.pos[2];
+        for (let j = lo[1]; j <= hi[1]; j++) { const y = (j + 0.5) - a.pos[1];
+          for (let i = lo[0]; i <= hi[0]; i++) { const x = (i + 0.5) - a.pos[0];
+            const tt = a.t + Math.sqrt(x * x + y * y + z * z) / a.G, idx = (k * N + j) * N + i;
+            if (tt < arr[idx]) { arr[idx] = tt; own[idx] = a.id; } } } }
+    }
+  }
+  return { arr, own };
+}
+
+function fractions(grid, nuc, times) {
+  const sorted = [[], []];
+  for (let i = 0; i < grid.arr.length; i++) if (grid.own[i] >= 0) sorted[nuc[grid.own[i]].ph].push(grid.arr[i]);
+  sorted.forEach(s => s.sort((a, b) => a - b));
+  const n = grid.arr.length;
+  const cnt = (s, t) => { let lo = 0, hi = s.length; while (lo < hi) { const m = (lo + hi) >> 1; if (s[m] <= t) lo = m + 1; else hi = m; } return lo; };
+  return times.map(t => [cnt(sorted[0], t) / n, cnt(sorted[1], t) / n]);
+}
+function avramiFit(times, X) {
+  const xs = [], ys = [];
+  times.forEach((t, i) => { if (t > 0 && X[i] > 0.03 && X[i] < 0.97) { xs.push(Math.log(t)); ys.push(Math.log(-Math.log(1 - X[i]))); } });
+  if (xs.length < 3) return null;
+  const mx = xs.reduce((a, b) => a + b) / xs.length, my = ys.reduce((a, b) => a + b) / ys.length;
+  let sxy = 0, sxx = 0; xs.forEach((x, i) => { sxy += (x - mx) * (ys[i] - my); sxx += (x - mx) ** 2; });
+  const n = sxy / sxx; return { n, b: my - n * mx, xs, ys };
+}
+
+// ------------------------------------------------------------------ 펜로즈 타일 (드브라위너 5방향 격자)
+const PENROSE = (() => {
+  const E = [0, 1, 2, 3, 4].map(j => [Math.cos(2 * Math.PI * j / 5), Math.sin(2 * Math.PI * j / 5)]);
+  const GAM = [0.13, 0.21, -0.07, 0.31, -0.58], N = 17;
+  const edges = new Map(), verts = new Map();
+  const key = (x, y) => Math.round(x * 1000) + "," + Math.round(y * 1000);
+  for (let r = 0; r < 5; r++) for (let s = r + 1; s < 5; s++) {
+    const det = E[r][0] * E[s][1] - E[r][1] * E[s][0];
+    for (let kr = -N; kr <= N; kr++) for (let ks = -N; ks <= N; ks++) {
+      const a = kr - GAM[r], b = ks - GAM[s];
+      const px = (a * E[s][1] - b * E[r][1]) / det, py = (E[r][0] * b - E[s][0] * a) / det;
+      if (Math.hypot(px, py) > N - 1.5) continue;
+      const K = E.map((e, i) => i === r ? kr : i === s ? ks : Math.ceil(px * e[0] + py * e[1] + GAM[i]));
+      let x0 = 0, y0 = 0; K.forEach((k, i) => { x0 += k * E[i][0]; y0 += k * E[i][1]; });
+      const P = [[x0, y0], [x0 + E[r][0], y0 + E[r][1]], [x0 + E[r][0] + E[s][0], y0 + E[r][1] + E[s][1]], [x0 + E[s][0], y0 + E[s][1]]];
+      for (let q = 0; q < 4; q++) {
+        const A = P[q], B = P[(q + 1) % 4];
+        const ke = [key(...A), key(...B)].sort().join("|");
+        if (!edges.has(ke)) edges.set(ke, [A[0], A[1], B[0], B[1]]);
+        verts.set(key(...A), A);
+      }
+    }
+  }
+  // 무게중심을 원점으로
+  let cx = 0, cy = 0; verts.forEach(v => { cx += v[0]; cy += v[1]; }); cx /= verts.size; cy /= verts.size;
+  const E2 = [...edges.values()].map(e => { const x1 = e[0] - cx, y1 = e[1] - cy, x2 = e[2] - cx, y2 = e[3] - cy; return [x1, y1, x2, y2, Math.hypot((x1 + x2) / 2, (y1 + y2) / 2)]; }).sort((a, b) => a[4] - b[4]);
+  const V2 = [...verts.values()].map(v => [v[0] - cx, v[1] - cy, Math.hypot(v[0] - cx, v[1] - cy)]).sort((a, b) => a[2] - b[2]);
+  return { E: E2, V: V2 };
+})();
+const upto = (arr, R, idx) => { let lo = 0, hi = arr.length; while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m][idx] <= R) lo = m + 1; else hi = m; } return lo; };
+
+// ------------------------------------------------------------------ 상태
+const $ = id => document.getElementById(id);
+const W2 = 64, H2 = 40, RES2 = 4, N3 = 40;
+const TIMES = Array.from({ length: 73 }, (_, i) => i * T_END / 72);
+const S = { dT: 0.30, gr: 0.80, t: 1.10, sat: false, cut: 1 };
+let sim2, sim3, grid2, grid3, P, frac3, frac2;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+// 액체 원자: 겹치지 않게 솎은 점
+const LIQ = (() => { const r = rng(99), pts = [], cell = new Map(), md = 0.82;
+  for (let i = 0; i < 9000 && pts.length < 2600; i++) { const x = r() * W2, y = r() * H2, cx = Math.floor(x), cy = Math.floor(y); let ok = true;
+    for (let a = -1; a <= 1 && ok; a++) for (let b = -1; b <= 1 && ok; b++) for (const q of cell.get((cx + a) + "," + (cy + b)) || []) if (Math.hypot(q[0] - x, q[1] - y) < md) { ok = false; break; }
+    if (ok) { const p = [x, y, r() * 6.28]; pts.push(p); const k = cx + "," + cy; (cell.get(k) || cell.set(k, []).get(k)).push(p); } }
+  return pts; })();
+
+function recompute() {
+  P = params(S.dT, S.gr);
+  sim2 = nucleate([W2, H2], 70, P, S.sat, SEED);
+  grid2 = arrivalGrid([W2 * RES2, H2 * RES2], 1 / RES2, sim2.nuc);
+  sim3 = nucleate([N3, N3, N3], 130, P, S.sat, SEED + 1000);
+  grid3 = arrivalGrid([N3, N3, N3], 1, sim3.nuc);
+  frac3 = fractions(grid3, sim3.nuc, TIMES);
+  frac2 = fractions(grid2, sim2.nuc, TIMES);
+  build3();
+  drawGraphs();
+  drawFrame();
+}
+
+// ------------------------------------------------------------------ 2D 원자 그림
+const c2 = $("c2"), x2 = c2.getContext("2d");
+function cellAt(x, y) { const i = Math.floor(x * RES2), j = Math.floor(y * RES2); if (i < 0 || j < 0 || i >= W2 * RES2 || j >= H2 * RES2) return -1; return j * W2 * RES2 + i; }
+function draw2(t, jitter) {
+  const sc = c2.width / W2, col = { q: css("--q"), qs: css("--q-soft"), c: css("--c"), cs: css("--c-soft"), l: css("--liq"), bg: css("--panel") };
+  x2.fillStyle = col.bg; x2.fillRect(0, 0, c2.width, c2.height);
+  const { arr, own } = grid2;
+  // 액체
+  x2.fillStyle = col.l;
+  const jr = jitter ? 0.09 : 0;
+  for (const p of LIQ) { const k = cellAt(p[0], p[1]); if (k >= 0 && arr[k] <= t) continue;
+    const a = p[2] + t * 40; x2.beginPath(); x2.arc((p[0] + jr * Math.cos(a)) * sc, (p[1] + jr * Math.sin(a * 1.3)) * sc, 0.2 * sc, 0, 6.283); x2.fill(); }
+  // 결정립
+  for (const g of sim2.nuc) {
+    if (g.t >= t) continue;
+    const R = g.G * (t - g.t), cs = Math.cos(g.rot), sn = Math.sin(g.rot), ox = g.pos[0], oy = g.pos[1];
+    const tr = (u, v) => { const a = u - g.off[0], b = v - g.off[1]; return [ox + cs * a - sn * b, oy + sn * a + cs * b]; };
+    const inG = (x, y) => { const k = cellAt(x, y); return k >= 0 && own[k] === g.id && arr[k] <= t; };
+    const dotC = g.ph === 0 ? col.q : col.c;
+    const shadeA = 0.6 + 0.4 * (g.shade - 0.78) / 0.36;   // 결정립마다 진하기를 조금씩 달리해 경계가 보이게
+    x2.globalAlpha = 0.55 * shadeA;
+    x2.strokeStyle = dotC; x2.lineWidth = Math.max(1, 0.08 * sc); x2.beginPath();
+    const pts = [];
+    if (g.ph === 0) {
+      const lim = R + 4.5, ne = upto(PENROSE.E, lim, 4), nv = upto(PENROSE.V, lim, 2);
+      for (let i = 0; i < ne; i++) { const e = PENROSE.E[i]; const A = tr(e[0], e[1]), B = tr(e[2], e[3]);
+        if (inG((A[0] + B[0]) / 2, (A[1] + B[1]) / 2)) { x2.moveTo(A[0] * sc, A[1] * sc); x2.lineTo(B[0] * sc, B[1] * sc); } }
+      for (let i = 0; i < nv; i++) { const v = PENROSE.V[i], A = tr(v[0], v[1]); if (inG(A[0], A[1])) pts.push(A); }
+    } else {
+      const m = Math.ceil(R + 4.5);
+      for (let i = -m; i <= m; i++) for (let j = -m; j <= m; j++) {
+        const A = tr(i, j); if (!inG(A[0], A[1])) continue; pts.push(A);
+        const B = tr(i + 1, j), C = tr(i, j + 1);
+        if (inG(B[0], B[1])) { x2.moveTo(A[0] * sc, A[1] * sc); x2.lineTo(B[0] * sc, B[1] * sc); }
+        if (inG(C[0], C[1])) { x2.moveTo(A[0] * sc, A[1] * sc); x2.lineTo(C[0] * sc, C[1] * sc); }
+      }
+    }
+    x2.stroke();
+    x2.globalAlpha = shadeA; x2.fillStyle = dotC;
+    for (const A of pts) { x2.beginPath(); x2.arc(A[0] * sc, A[1] * sc, 0.2 * sc, 0, 6.283); x2.fill(); }
+    x2.globalAlpha = 1;
+  }
+  // 분율 표시
+  let q = 0, c = 0; const n = arr.length;
+  for (let i = 0; i < n; i++) if (own[i] >= 0 && arr[i] <= t) { if (sim2.nuc[own[i]].ph === 0) q++; else c++; }
+  const pct = v => (100 * v / n).toFixed(0) + "%";
+  $("n2q").textContent = pct(q); $("n2c").textContent = pct(c); $("n2l").textContent = pct(n - q - c);
+  $("n2g").textContent = sim2.nuc.filter(g => g.t < t).length;
+  $("b2q").style.width = (100 * q / n) + "%"; $("b2c").style.width = (100 * c / n) + "%";
+}
+
+// ------------------------------------------------------------------ 3D 결정립 (three.js)
+let three = null;
+function init3() {
+  const box = $("v3");
+  if (!window.THREE) { $("v3msg").textContent = "3D 화면을 불러오지 못함 (인터넷 연결 확인). 2D 그림과 그래프는 그대로 사용 가능."; return; }
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  box.appendChild(renderer.domElement); $("v3msg").hidden = true;
+  const scene = new THREE.Scene();
+  const cam = new THREE.PerspectiveCamera(32, 1, 1, 1000);
+  cam.position.set(N3 * 1.55, N3 * 1.15, N3 * 1.85);
+  const ctl = THREE.OrbitControls ? new THREE.OrbitControls(cam, renderer.domElement) : null;
+  if (ctl) { ctl.target.set(0, 0, 0); ctl.enableDamping = true; ctl.enablePan = false; }
+  cam.lookAt(0, 0, 0);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.62));
+  const dl = new THREE.DirectionalLight(0xffffff, 0.55); dl.position.set(1, 1.6, 1.2); scene.add(dl);
+  const dl2 = new THREE.DirectionalLight(0xffffff, 0.2); dl2.position.set(-1, -0.5, -0.8); scene.add(dl2);
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const mesh = new THREE.InstancedMesh(geo, mat, N3 * N3 * N3);
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.setColorAt(0, new THREE.Color(0xffffff));   // 첫 렌더 전에 인스턴스 색 버퍼를 만들어 둬야 셰이더가 색을 씀
+  scene.add(mesh);
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(N3, N3, N3)), new THREE.LineBasicMaterial({ color: 0x9a9890 }));
+  scene.add(edges);
+  const liquid = new THREE.Mesh(new THREE.BoxGeometry(N3, N3, N3), new THREE.MeshBasicMaterial({ color: 0xc9c6be, transparent: true, opacity: 0.12, depthWrite: false }));
+  scene.add(liquid);
+  function resize() { const w = box.clientWidth, h = box.clientHeight; renderer.setSize(w, h, false); renderer.domElement.style.width = "100%"; renderer.domElement.style.height = "100%"; cam.aspect = w / h; cam.updateProjectionMatrix(); }
+  new ResizeObserver(resize).observe(box); resize();
+  (function loop() { requestAnimationFrame(loop); ctl && ctl.update(); renderer.render(scene, cam); })();
+  three = { mesh, liquid, edges };
+}
+let colors3 = null;
+function build3() {
+  if (!three) return;
+  const qc = new THREE.Color(css("--q")), cc = new THREE.Color("#6f716d");
+  colors3 = sim3.nuc.map(g => (g.ph === 0 ? qc : cc).clone().multiplyScalar(g.shade));
+}
+function draw3(t) {
+  if (!three) return;
+  const { arr, own } = grid3, N = N3, xmax = Math.round(S.cut * N);
+  const shown = i => own[i] >= 0 && arr[i] <= t && (i % N) < xmax;
+  const m = new THREE.Matrix4(); let n = 0, q = 0, c = 0;
+  for (let i = 0; i < arr.length; i++) {
+    if (own[i] >= 0 && arr[i] <= t) { if (sim3.nuc[own[i]].ph === 0) q++; else c++; }
+    if (!shown(i)) continue;
+    const x = i % N, y = Math.floor(i / N) % N, z = Math.floor(i / (N * N));
+    // 겉에 드러난 칸만 그림
+    if (x > 0 && x < xmax - 1 && y > 0 && y < N - 1 && z > 0 && z < N - 1 &&
+        shown(i - 1) && shown(i + 1) && shown(i - N) && shown(i + N) && shown(i - N * N) && shown(i + N * N)) continue;
+    m.makeTranslation(x - N / 2 + 0.5, z - N / 2 + 0.5, y - N / 2 + 0.5);
+    three.mesh.setMatrixAt(n, m); three.mesh.setColorAt(n, colors3[own[i]]); n++;
+  }
+  three.mesh.count = n; three.mesh.instanceMatrix.needsUpdate = true;
+  if (three.mesh.instanceColor) three.mesh.instanceColor.needsUpdate = true;
+  three.liquid.visible = (q + c) < arr.length * 0.995;
+  const tot = arr.length;
+  $("n3q").textContent = (100 * q / tot).toFixed(0) + "%"; $("n3c").textContent = (100 * c / tot).toFixed(0) + "%";
+}
+
+// ------------------------------------------------------------------ 그래프 (축 끝 화살표 + 변수 기호)
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, at, parent, text) { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); if (text != null) e.textContent = text; parent && parent.appendChild(e); return e; }
+function axes(svg, o) {
+  svg.innerHTML = "";
+  const L = 52, R = 400, Tp = 34, B = 236;
+  const X = v => L + (v - o.x0) / (o.x1 - o.x0) * (R - L), Y = v => B - (v - o.y0) / (o.y1 - o.y0) * (B - Tp);
+  const ink = css("--ink"), mut = css("--muted"), line = css("--line");
+  const defs = el("defs", {}, svg);
+  const mk = el("marker", { id: svg.id + "a", viewBox: "0 0 10 10", refX: 8, refY: 5, markerWidth: 9, markerHeight: 9, orient: "auto-start-reverse" }, defs);
+  el("path", { d: "M0,0 L10,5 L0,10 z", fill: ink }, mk);
+  const ox = o.xAxisAt != null ? Y(o.xAxisAt) : B, oy = o.yAxisAt != null ? X(o.yAxisAt) : L;
+  (o.xt || []).forEach(v => { el("line", { x1: X(v), x2: X(v), y1: Tp, y2: B, stroke: line, "stroke-width": 0.8 }, svg); el("text", { x: X(v), y: B + 16, "text-anchor": "middle", class: "tick" }, svg, o.xf ? o.xf(v) : v); });
+  (o.yt || []).forEach(v => { el("line", { x1: L, x2: R, y1: Y(v), y2: Y(v), stroke: line, "stroke-width": 0.8 }, svg); el("text", { x: L - 7, y: Y(v) + 4, "text-anchor": "end", class: "tick" }, svg, o.yf ? o.yf(v) : v); });
+  el("line", { x1: L, y1: ox, x2: R + 16, y2: ox, stroke: ink, "stroke-width": 1.6, "marker-end": `url(#${svg.id}a)` }, svg);
+  el("line", { x1: oy, y1: B, x2: oy, y2: Tp - 16, stroke: ink, "stroke-width": 1.6, "marker-end": `url(#${svg.id}a)` }, svg);
+  const xs = el("text", { x: R + 21, y: ox + 5, class: "sym" }, svg); xs.innerHTML = o.xs;
+  const ys = el("text", { x: oy, y: Tp - 22, "text-anchor": "middle", class: "sym" }, svg); ys.innerHTML = o.ys;
+  const clip = el("clipPath", { id: svg.id + "c" }, defs); el("rect", { x: L, y: Tp - 6, width: R - L + 6, height: B - Tp + 6 }, clip);
+  const g = el("g", { "clip-path": `url(#${svg.id}c)` }, svg);
+  return { X, Y, g, svg, ink, mut };
+}
+const path = (pts) => pts.filter(p => isFinite(p[1])).map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + "," + p[1].toFixed(1)).join("");
+const sub = (a, b) => `${a}<tspan baseline-shift="sub" font-size="10">${b}</tspan>`;
+
+function drawGraphs() {
+  const q = css("--q"), c = css("--c");
+  // (1) ΔG(r)
+  {
+    const A = axes($("g1"), { x0: 0, x1: 8, y0: -40, y1: 60, xAxisAt: 0, xs: "r", ys: "ΔG", yt: [], xt: [] });
+    const dg = [3 * df(P.T, TM[0]), 3 * df(P.T, TM[1])], gm = [S.gr, 1], cols = [q, c];
+    const peaks = [];
+    for (let k = 1; k >= 0; k--) {
+      const pts = []; for (let r = 0; r <= 8; r += 0.04) pts.push([A.X(r), A.Y(-4 / 3 * Math.PI * r ** 3 * dg[k] + 4 * Math.PI * r * r * gm[k])]);
+      el("path", { d: path(pts), fill: "none", stroke: cols[k], "stroke-width": 2.6 }, A.g);
+      if (dg[k] > 0) { const rs = 2 * gm[k] / dg[k], bs = 16 * Math.PI * gm[k] ** 3 / (3 * dg[k] ** 2); peaks[k] = { rs, bs };
+        if (rs < 8 && bs < 60) { el("line", { x1: A.X(rs), x2: A.X(rs), y1: A.Y(0), y2: A.Y(bs), stroke: cols[k], "stroke-dasharray": "3 3" }, A.g); el("circle", { cx: A.X(rs), cy: A.Y(bs), r: 4.5, fill: cols[k] }, A.g); } }
+    }
+    const lab = (k, name) => { const p = peaks[k]; if (!p) return; const off = p.bs >= 60 || p.rs >= 8;
+      el("text", { x: off ? A.X(7.8) : A.X(p.rs) + (k ? -8 : 8), y: off ? A.Y(55) + (k ? 16 : 0) : A.Y(p.bs) - (k ? 10 : 22), class: "lab", fill: k ? c : q, "text-anchor": off ? "end" : (k ? "end" : "start") }, A.svg, off ? name + " 장벽 ↑ (화면 밖)" : `${name} ΔG* = ${p.bs.toFixed(1)}`); };
+    lab(1, "결정"); lab(0, "준결정");
+    el("text", { x: A.X(0) - 5, y: A.Y(0) + 15, "text-anchor": "end", class: "tick" }, A.svg, "O");
+    const bq = peaks[0] ? peaks[0].bs : Infinity, bc = peaks[1] ? peaks[1].bs : Infinity;
+    $("g1n").innerHTML = isFinite(bq) ? `장벽 비 ΔG*<sub>Q</sub>/ΔG*<sub>C</sub> = <b>${(bq / bc).toFixed(2)}</b> → ${bq < bc ? "준결정 장벽이 낮음" : "결정 장벽이 낮음"}` : "T > 준결정 녹는점 → 준결정 핵생성 불가";
+  }
+  // (2) ΔG*/kT vs T
+  {
+    const A = axes($("g2"), { x0: 0.45, x1: 1.0, y0: 0, y1: 100, xs: "T/T" + "<tspan baseline-shift='sub' font-size='10'>C</tspan>", ys: "ΔG*/kT", xt: [0.5, 0.6, 0.7, 0.8, 0.9, 1.0], yt: [0, 50, 100], xf: v => v.toFixed(1) });
+    [[S.gr, TM[0], q], [1, TM[1], c]].forEach(([g, Tm, col]) => { const pts = []; for (let T = 0.45; T < Tm - 0.002; T += 0.002) pts.push([A.X(T), A.Y(Math.min(barrier(g, T, Tm), 140))]); el("path", { d: path(pts), fill: "none", stroke: col, "stroke-width": 2.6 }, A.g); });
+    el("line", { x1: A.X(0.9), x2: A.X(0.9), y1: A.Y(0), y2: A.Y(100), stroke: css("--c-soft"), "stroke-dasharray": "4 4" }, A.g);
+    el("text", { x: A.X(0.9) - 4, y: A.Y(4), class: "tick", "text-anchor": "end" }, A.g, "준결정 녹는점");
+    el("line", { x1: A.X(P.T), x2: A.X(P.T), y1: A.Y(0), y2: A.Y(100), stroke: css("--ink"), "stroke-width": 1.4 }, A.g);
+    if (isFinite(P.BQ) && P.BQ < 100) el("circle", { cx: A.X(P.T), cy: A.Y(P.BQ), r: 5, fill: q }, A.g);
+    if (P.BC < 100) el("circle", { cx: A.X(P.T), cy: A.Y(P.BC), r: 5, fill: c }, A.g);
+    const exitT = (g, Tm) => { let T = 0.45; while (T < Tm && barrier(g, T, Tm) < 88) T += 0.002; return T; };
+    const tq = exitT(S.gr, TM[0]), tc = exitT(1, TM[1]);
+    el("text", { x: A.X(tq) - 8, y: A.Y(88), class: "lab", fill: q, "text-anchor": "end" }, A.g, "준결정");
+    el("text", { x: A.X(tc) + 8, y: A.Y(88), class: "lab", fill: c }, A.g, "결정");
+    const ratio = Math.exp(P.logRho);
+    $("g2n").innerHTML = isFinite(P.BQ) ? `지금 T/T<sub>C</sub> = ${P.T.toFixed(2)}: 장벽 준결정 <b>${P.BQ.toFixed(1)}</b>, 결정 <b>${P.BC.toFixed(1)}</b> → 핵생성 속도 비 I<sub>Q</sub>/I<sub>C</sub> ≈ <b>${ratio > 1e3 || ratio < 1e-3 ? "10^" + (P.logRho / Math.LN10).toFixed(0) : ratio.toFixed(2)}</b>` : `지금 T/T<sub>C</sub> = ${P.T.toFixed(2)} > 0.9 → 준결정 구동력 0`;
+  }
+  // (3) X(t)
+  {
+    const A = axes($("g3"), { x0: 0, x1: T_END, y0: 0, y1: 1, xs: "t/τ", ys: "X", xt: [0, 0.5, 1, 1.5], yt: [0, 0.5, 1], xf: v => v.toFixed(1), yf: v => v.toFixed(1) });
+    const nQ = sim3.nuc.filter(g => g.ph === 0).length, nC = sim3.nuc.length - nQ;
+    const f = fTheory(P, 3, S.sat, nQ, nC), n = S.sat ? 3 : 4;
+    const th = TIMES.map(t => 1 - Math.exp(-(t ** n)));
+    [[f, q, 0], [1 - f, c, 1]].forEach(([ff, col, k]) => {
+      el("path", { d: path(TIMES.map((t, i) => [A.X(t), A.Y(ff * th[i])])), fill: "none", stroke: col, "stroke-width": 2.4 }, A.g);
+      TIMES.forEach((t, i) => { if (i % 3) return; el("circle", { cx: A.X(t), cy: A.Y(frac3[i][k]), r: 3.2, fill: css("--panel"), stroke: col, "stroke-width": 1.6 }, A.g); });
+    });
+    el("line", { x1: A.X(S.t), x2: A.X(S.t), y1: A.Y(0), y2: A.Y(1), stroke: css("--ink"), "stroke-dasharray": "2 3" }, A.g);
+    el("text", { x: A.X(1.78), y: A.Y(f) - 6, class: "lab", fill: q, "text-anchor": "end" }, A.g, "준결정");
+    el("text", { x: A.X(1.78), y: A.Y(1 - f) - 6, class: "lab", fill: c, "text-anchor": "end" }, A.g, "결정");
+    const last = frac3[frac3.length - 1], fs = last[0] / Math.max(1e-9, last[0] + last[1]);
+    $("fth").textContent = (100 * f).toFixed(1) + "%"; $("fsim").textContent = (100 * fs).toFixed(1) + "%";
+    $("g3n").innerHTML = `최종 준결정 비율 이론 <b>${(100 * f).toFixed(1)}%</b>, 3D 시뮬레이션 <b>${(100 * fs).toFixed(1)}%</b> (f<sub>Q</sub> = I<sub>Q</sub>G<sub>Q</sub>³ / (I<sub>Q</sub>G<sub>Q</sub>³ + I<sub>C</sub>G<sub>C</sub>³))`;
+  }
+  // (4) 아브라미 직선
+  {
+    const A = axes($("g4"), { x0: -1.6, x1: 0.6, y0: -6, y1: 2.5, xs: "ln t", ys: "ln(−ln(1−X))", xt: [-1.5, -1, -0.5, 0, 0.5], yt: [-6, -4, -2, 0, 2], xAxisAt: -6 });
+    const out = [];
+    [[frac3, "3D", q, S.sat ? 3 : 4], [frac2, "2D", c, S.sat ? 2 : 3]].forEach(([fr, nm, col, nth]) => {
+      const X = fr.map(v => v[0] + v[1]), fit = avramiFit(TIMES, X);
+      if (!fit) return;
+      el("path", { d: path([[-1.6, -1.6 * nth], [0.6, 0.6 * nth]].map(([x, y]) => [A.X(x), A.Y(y)])), fill: "none", stroke: col, "stroke-width": 1.4, "stroke-dasharray": "5 4", opacity: 0.8 }, A.g);
+      fit.xs.forEach((x, i) => el("circle", { cx: A.X(x), cy: A.Y(fit.ys[i]), r: 3, fill: col }, A.g));
+      out.push(`${nm} 기울기 n = <b>${fit.n.toFixed(2)}</b> (이론 ${nth})`);
+      el("text", { x: A.X(-1.5), y: A.Y(nm === "3D" ? 1.9 : 1.0), class: "lab", fill: col }, A.g, `${nm}  기울기 n = ${fit.n.toFixed(2)}`);
+    });
+    const lt = Math.log(Math.max(S.t, 0.01));
+    if (lt > -1.6) el("line", { x1: A.X(lt), x2: A.X(lt), y1: A.Y(-6), y2: A.Y(2.5), stroke: css("--ink"), "stroke-dasharray": "2 3" }, A.g);
+    $("g4n").innerHTML = out.join(", ") + " → 점선 = 이론 기울기. 핵생성 방식을 바꾸면 기울기 1 차이";
+  }
+}
+
+// ------------------------------------------------------------------ 이벤트
+let playing = false, last = 0, jit = false;
+function drawFrame() { draw2(S.t, jit); draw3(S.t); $("to").textContent = S.t.toFixed(2); }
+let raf = 0; const schedule = (full) => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => full ? recompute() : (drawFrame(), drawGraphsLight())); };
+function drawGraphsLight() { drawGraphs(); }
+$("dT").addEventListener("input", e => { S.dT = +e.target.value; $("dTo").textContent = S.dT.toFixed(2); schedule(true); });
+$("gr").addEventListener("input", e => { S.gr = +e.target.value; $("gro").textContent = S.gr.toFixed(2); schedule(true); });
+$("t").addEventListener("input", e => { S.t = +e.target.value; schedule(false); });
+$("cut").addEventListener("input", e => { S.cut = +e.target.value; $("cuto").textContent = Math.round(S.cut * 100) + "%"; draw3(S.t); });
+document.querySelectorAll("input[name=mode]").forEach(r => r.addEventListener("change", e => { S.sat = e.target.value === "sat"; schedule(true); }));
+$("reseed").addEventListener("click", () => { SEED = (SEED * 7919 + 13) % 100003; recompute(); });
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+$("play").addEventListener("click", () => {
+  playing = !playing; $("play").textContent = playing ? "❚❚ 멈춤" : "▶ 재생";
+  if (playing) { if (S.t >= T_END - 0.01) S.t = 0; last = performance.now(); requestAnimationFrame(step); } else { jit = false; drawFrame(); }
+});
+function step(now) {
+  if (!playing) return;
+  S.t = Math.min(T_END, S.t + (now - last) / 1000 * 0.32); last = now; jit = !reduce;
+  $("t").value = S.t; drawFrame(); drawGraphs();
+  if (S.t >= T_END) { playing = false; jit = false; $("play").textContent = "▶ 재생"; drawFrame(); return; }
+  requestAnimationFrame(step);
+}
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { build3(); drawGraphs(); drawFrame(); });
+
+// 로컬 파일 캡처용: ?t=0.8&dT=0.3&gr=0.8 (발표 그림 만들 때만 사용)
+try { const q = new URLSearchParams(location.search); for (const k of ["t", "dT", "gr", "cut"]) if (q.has(k)) { S[k] = +q.get(k); const i = $(k); if (i) i.value = S[k]; }
+  if (q.get("mode") === "sat") { S.sat = true; $("m-sat").checked = true; }
+  $("dTo").textContent = S.dT.toFixed(2); $("gro").textContent = S.gr.toFixed(2); $("cuto").textContent = Math.round(S.cut * 100) + "%"; } catch (e) {}
+
+try { init3(); } catch (e) { three = null; $("v3msg").hidden = false; $("v3msg").textContent = "3D 화면을 열 수 없음 (" + e.message + "). 2D 그림과 그래프는 그대로 사용 가능."; }
+recompute();
+</script>
+
+</body>
+</html>
