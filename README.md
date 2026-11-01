@@ -48,5 +48,5 @@
 ---
 
 ### 👥 팀 정보 (Contributors)
-- **엠케미 포럼 1조** (chunheejae1004-cyber, claude, kraewon7422)
+- **엠케미 포럼 1조** (claude, csmsm0518)
 
